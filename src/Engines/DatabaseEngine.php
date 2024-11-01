@@ -206,13 +206,39 @@ class DatabaseEngine extends Engine implements PaginatesEloquentModelsUsingDatab
 
             $likeOperator = $connectionType == 'pgsql' ? 'ilike' : 'like';
 
+            $fullTextColumnsChecked = [];
+
             foreach ($columns as $column) {
-                if (in_array($column, $fullTextColumns)) {
+                if (in_array($column, $fullTextColumnsChecked)) {
+                    continue;
+                }
+
+                if (in_array($column, Arr::flatten($fullTextColumns))) {
+                    $fullTextColumnTarget = Arr::first(
+                        $fullTextColumns,
+                        fn ($entry) => is_array($entry)
+                            ? in_array($column, $entry)
+                            : $entry === $column
+                    );
+
+                    // Handle full-text query depending on given type (string - single index; array - compound index)
+                    if (! is_array($fullTextColumnTarget)) {
+                        $query->orWhereFullText(
+                            $builder->model->qualifyColumn($column),
+                            $builder->query,
+                            $this->getFullTextOptions($builder)
+                        );
+
+                        continue;
+                    }
+
                     $query->orWhereFullText(
-                        $builder->model->qualifyColumn($column),
+                        Arr::map($fullTextColumnTarget, fn ($target) => $builder->model->qualifyColumn($target)),
                         $builder->query,
                         $this->getFullTextOptions($builder)
                     );
+
+                    $fullTextColumnsChecked += $fullTextColumnTarget;
                 } else {
                     if ($canSearchPrimaryKey && $column === $builder->model->getScoutKeyName()) {
                         continue;
